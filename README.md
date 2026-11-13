@@ -14,7 +14,7 @@ de dados local SQLite**.
 ## 1. Requisitos Mínimos
 
 -   **Sistema Operacional:** Windows 10/11, Linux ou macOS
--   **Python:** 3.10 ou superior
+- **Python:** [Baixar Python 3.10 ou superior](https://www.python.org/downloads/)
 -   **Pacotes Python:**
     -   `flask`
     -   `opencv-python`
