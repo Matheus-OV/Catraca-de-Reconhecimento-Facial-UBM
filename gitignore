@@ -1,0 +1,25 @@
+# Arquivos temporários do Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Ambientes virtuais
+.venv/
+venv/
+
+# Banco de dados local
+*.db
+*.sqlite
+*.sqlite3
+
+# Fotos cadastradas (preserva a pasta vazia)
+photos/*
+!photos/.gitkeep
+
+# Configurações de editores
+.vscode/
+.idea/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
