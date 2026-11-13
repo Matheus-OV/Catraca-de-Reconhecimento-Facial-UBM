@@ -88,7 +88,7 @@ pip install -r requirements.txt
 python3 app.py
 ```
 
-Em seguida, abra o navegador em `http://localhost:8000`.
+Em seguida, abra o navegador em `http://localhost:8000..`.
 
 ------------------------------------------------------------------------
 
