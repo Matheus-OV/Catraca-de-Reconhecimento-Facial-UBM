@@ -14,7 +14,9 @@ from pathlib import Path
 from typing import Any, Generator
 
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = Path(os.getenv("RF_DB_PATH", str(BASE_DIR / "reconhecimento.db")))
+# No Vercel o disco é somente leitura (exceto /tmp), então o banco vai para /tmp.
+_default_db = "/tmp/reconhecimento.db" if os.getenv("VERCEL") else str(BASE_DIR / "reconhecimento.db")
+DB_PATH = Path(os.getenv("RF_DB_PATH", _default_db))
 
 
 @contextmanager
