@@ -28,7 +28,7 @@ No Windows, acesse a pasta do projeto pelo PowerShell e execute os
 seguintes comandos:
 
 ``` powershell
-# 1. Criar e ativar o ambiente virtual
+# 1. Criar e ativar o ambiente virtual...
 python -m venv .venv
 .\\.venv\\Scripts\\Activate.ps1
 
