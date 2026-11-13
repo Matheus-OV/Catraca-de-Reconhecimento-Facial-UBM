@@ -1,0 +1,94 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="card">
+    <h2>Cadastrar Nova Pessoa</h2>
+    <p style="color: var(--muted); margin-top: 0;">
+        Cadastre uma pessoa enviando uma foto nítida do rosto ou capturando diretamente pela webcam.
+    </p>
+
+    {% if error %}
+        <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+
+    {% if registered %}
+        <div class="alert alert-success">
+            Pessoa <strong>{{ registered.name }}</strong> (ID #{{ registered.person_id }}) cadastrada com sucesso!
+            <div style="margin-top: 0.75rem;">
+                <img src="data:image/jpeg;base64,{{ registered.photo_b64 }}" alt="{{ registered.name }}" style="width: 110px; height: 110px; object-fit: cover; border-radius: 8px; border: 2px solid #16a34a;">
+            </div>
+        </div>
+    {% endif %}
+
+    <h3>Opção 1: Cadastrar enviando uma foto</h3>
+    <form method="post" enctype="multipart/form-data">
+        <div class="form-group">
+            <label for="name">Nome completo da pessoa:</label>
+            <input type="text" id="name" name="name" placeholder="Ex.: Maria Silva" required>
+        </div>
+        <div class="form-group">
+            <label for="image">Foto com o rosto visível:</label>
+            <input type="file" id="image" name="image" accept="image/*" required>
+        </div>
+        <button type="submit">Cadastrar por Foto</button>
+    </form>
+</div>
+
+<div class="card">
+    <h3>Opção 2: Cadastrar pela Webcam</h3>
+    <div class="form-group">
+        <label for="webcam-name">Nome da pessoa:</label>
+        <input type="text" id="webcam-name" placeholder="Ex.: João Souza">
+    </div>
+    <div style="margin-bottom: 1rem;">
+        <video id="reg-video" width="480" height="360" autoplay playsinline muted style="background: #000; border-radius: 8px; max-width: 100%;"></video>
+    </div>
+    <button type="button" id="capture-register-btn">Capturar da Webcam e Cadastrar</button>
+    <div id="webcam-msg" style="margin-top: 1rem;"></div>
+</div>
+
+<script>
+const regVideo = document.getElementById('reg-video');
+const capBtn = document.getElementById('capture-register-btn');
+const msgBox = document.getElementById('webcam-msg');
+
+navigator.mediaDevices.getUserMedia({ video: true })
+    .then(stream => { regVideo.srcObject = stream; })
+    .catch(() => {});
+
+capBtn.addEventListener('click', () => {
+    const name = document.getElementById('webcam-name').value.trim();
+    if (!name) {
+        msgBox.innerHTML = '<div class="alert alert-error">Digite o nome da pessoa antes de capturar.</div>';
+        return;
+    }
+    if (!regVideo.videoWidth) {
+        msgBox.innerHTML = '<div class="alert alert-error">A webcam não está ativa.</div>';
+        return;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = regVideo.videoWidth;
+    canvas.height = regVideo.videoHeight;
+    canvas.getContext('2d').drawImage(regVideo, 0, 0);
+
+    canvas.toBlob(blob => {
+        const fd = new FormData();
+        fd.append('name', name);
+        fd.append('image', blob, 'webcam_register.jpg');
+
+        fetch('/api/register', { method: 'POST', body: fd })
+            .then(r => r.json())
+            .then(res => {
+                if (res.success) {
+                    msgBox.innerHTML = `<div class="alert alert-success">Cadastro de <strong>${res.name}</strong> realizado com sucesso!</div>`;
+                } else {
+                    msgBox.innerHTML = `<div class="alert alert-error">${res.error || 'Falha ao cadastrar.'}</div>`;
+                }
+            })
+            .catch(() => {
+                msgBox.innerHTML = '<div class="alert alert-error">Erro de comunicação com o servidor.</div>';
+            });
+    }, 'image/jpeg', 0.9);
+});
+</script>
+{% endblock %}

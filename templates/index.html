@@ -1,0 +1,70 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="card">
+    <h2>Detecção e Reconhecimento Facial em Imagem</h2>
+    <p style="color: var(--muted); margin-top: 0;">
+        Envie uma imagem para localizar automaticamente todos os rostos e identificar pessoas cadastradas no banco de dados local.
+    </p>
+
+    {% if error %}
+        <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+
+    <form method="post" enctype="multipart/form-data">
+        <div class="form-group">
+            <label for="image">Selecione uma foto (JPG, PNG, WebP):</label>
+            <input type="file" id="image" name="image" accept="image/*" required>
+        </div>
+        <div class="form-group">
+            <label style="font-weight: normal; cursor: pointer;">
+                <input type="checkbox" name="blur"> Desfocar rostos detectados (modo privacidade)
+            </label>
+        </div>
+        <button type="submit">Processar Imagem</button>
+    </form>
+</div>
+
+{% if result %}
+<div class="card">
+    <h2>Resultado da Análise</h2>
+    <p>
+        <strong>Arquivo:</strong> {{ filename }} &nbsp;|&nbsp;
+        <strong>Rostos detectados:</strong> <span class="badge">{{ result.faces_count }}</span> &nbsp;|&nbsp;
+        <strong>Pessoas reconhecidas:</strong>
+        {% if result.recognized_names %}
+            <span class="badge" style="background: #dcfce7; color: #166534;">{{ result.recognized_names | join(', ') }}</span>
+        {% else %}
+            <span style="color: var(--muted);">Nenhuma pessoa cadastrada identificada</span>
+        {% endif %}
+    </p>
+
+    <div style="margin-top: 1rem;">
+        <img class="preview" src="data:image/jpeg;base64,{{ result.annotated_image_b64 }}" alt="Imagem processada">
+    </div>
+
+    {% if result.faces %}
+    <h3 style="margin-top: 1.25rem; font-size: 1.05rem;">Detalhes por Rosto</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Identificação</th>
+                <th>Similaridade</th>
+                <th>Coordenadas (X, Y, Largura, Altura)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for f in result.faces %}
+            <tr>
+                <td>{{ loop.index }}</td>
+                <td><strong>{{ f.name }}</strong></td>
+                <td>{{ "%.1f"|format(f.confidence) }}%</td>
+                <td>{{ f.box }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>
+{% endif %}
+{% endblock %}

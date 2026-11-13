@@ -1,0 +1,81 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="card">
+    <h2>Pessoas Cadastradas ({{ people | length }})</h2>
+    {% if not people %}
+        <p style="color: var(--muted);">Nenhuma pessoa cadastrada ainda. <a href="/register">Clique aqui para cadastrar</a>.</p>
+    {% else %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Foto</th>
+                    <th>Nome</th>
+                    <th>Data de Cadastro</th>
+                    <th>Ação</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in people %}
+                <tr id="person-row-{{ p.id }}">
+                    <td>
+                        {% if p.photo_b64 %}
+                            <img src="data:image/jpeg;base64,{{ p.photo_b64 }}" alt="{{ p.name }}" style="width: 56px; height: 56px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border);">
+                        {% else %}
+                            <span>Sem foto</span>
+                        {% endif %}
+                    </td>
+                    <td><strong>{{ p.name }}</strong></td>
+                    <td>{{ p.created_at }}</td>
+                    <td>
+                        <button class="danger" type="button" onclick="removePerson({{ p.id }})">Remover</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>Histórico Recente de Detecções</h2>
+    {% if not detections %}
+        <p style="color: var(--muted);">Nenhuma detecção registrada até o momento.</p>
+    {% else %}
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Imagem</th>
+                    <th>Rostos</th>
+                    <th>Reconhecidos</th>
+                    <th>Data/Hora</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for d in detections %}
+                <tr>
+                    <td>#{{ d.id }}</td>
+                    <td>{{ d.image_name }}</td>
+                    <td><span class="badge">{{ d.faces_count }}</span></td>
+                    <td>{{ d.recognized_names }}</td>
+                    <td>{{ d.created_at }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+</div>
+
+<script>
+function removePerson(personId) {
+    fetch(`/api/people/${personId}`, { method: 'DELETE' })
+        .then(r => r.json())
+        .then(res => {
+            if (res.success) {
+                const row = document.getElementById(`person-row-${personId}`);
+                if (row) row.remove();
+            }
+        });
+}
+</script>
+{% endblock %}

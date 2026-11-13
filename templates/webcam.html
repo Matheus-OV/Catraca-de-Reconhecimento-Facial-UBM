@@ -1,0 +1,105 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="card">
+    <h2>Reconhecimento Facial em Tempo Real (Webcam)</h2>
+    <p style="color: var(--muted); margin-top: 0;">
+        Clique em <strong>Iniciar Monitoramento</strong> para detectar e reconhecer rostos em tempo real pela sua câmera.
+    </p>
+
+    <div id="cam-error" class="alert alert-error" style="display: none;"></div>
+
+    <div style="position: relative; display: inline-block; max-width: 100%; background: #000; border-radius: 8px; overflow: hidden;">
+        <video id="video" width="640" height="480" autoplay playsinline muted style="display: block; max-width: 100%;"></video>
+        <canvas id="overlay" width="640" height="480" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;"></canvas>
+    </div>
+
+    <div style="margin-top: 1rem; display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+        <button id="toggle-btn" type="button">Iniciar Monitoramento</button>
+        <span id="status-text" style="color: var(--muted); font-weight: 500;">Câmera aguardando início...</span>
+    </div>
+</div>
+
+<script>
+const video = document.getElementById('video');
+const overlay = document.getElementById('overlay');
+const toggleBtn = document.getElementById('toggle-btn');
+const statusText = document.getElementById('status-text');
+const camError = document.getElementById('cam-error');
+
+let timer = null;
+let busy = false;
+
+navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
+    .then(stream => {
+        video.srcObject = stream;
+    })
+    .catch(err => {
+        camError.style.display = 'block';
+        camError.textContent = 'Não foi possível acessar a webcam: ' + err.message;
+    });
+
+function captureAndAnalyze() {
+    if (busy || !video.videoWidth) return;
+    busy = true;
+
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = video.videoWidth;
+    tempCanvas.height = video.videoHeight;
+    tempCanvas.getContext('2d').drawImage(video, 0, 0);
+
+    tempCanvas.toBlob(blob => {
+        if (!blob) { busy = false; return; }
+        const formData = new FormData();
+        formData.append('image', blob, 'webcam.jpg');
+
+        fetch('/api/analyze', { method: 'POST', body: formData })
+            .then(r => r.json())
+            .then(data => {
+                const ctx = overlay.getContext('2d');
+                overlay.width = video.videoWidth;
+                overlay.height = video.videoHeight;
+                ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+                if (!data.success) return;
+
+                const faces = data.faces || [];
+                statusText.textContent = `Rostos na cena: ${faces.length} | Reconhecidos: ${(data.recognized_names || []).join(', ') || 'Nenhum'}`;
+
+                faces.forEach(face => {
+                    const [x, y, w, h] = face.box;
+                    const recognized = face.name && face.name !== 'Desconhecido';
+                    ctx.strokeStyle = recognized ? '#22c55e' : '#f59e0b';
+                    ctx.lineWidth = 3;
+                    ctx.strokeRect(x, y, w, h);
+
+                    const label = recognized ? `${face.name} (${face.confidence.toFixed(0)}%)` : 'Desconhecido';
+                    ctx.font = 'bold 16px sans-serif';
+                    const textWidth = ctx.measureText(label).width;
+                    ctx.fillStyle = recognized ? '#16a34a' : '#d97706';
+                    ctx.fillRect(x, Math.max(0, y - 26), textWidth + 12, 24);
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillText(label, x + 6, Math.max(16, y - 8));
+                });
+            })
+            .catch(() => {})
+            .finally(() => { busy = false; });
+    }, 'image/jpeg', 0.85);
+}
+
+toggleBtn.addEventListener('click', () => {
+    if (timer) {
+        clearInterval(timer);
+        timer = null;
+        toggleBtn.textContent = 'Iniciar Monitoramento';
+        statusText.textContent = 'Monitoramento pausado.';
+        const ctx = overlay.getContext('2d');
+        ctx.clearRect(0, 0, overlay.width, overlay.height);
+    } else {
+        captureAndAnalyze();
+        timer = setInterval(captureAndAnalyze, 900);
+        toggleBtn.textContent = 'Parar Monitoramento';
+        statusText.textContent = 'Monitorando em tempo real...';
+    }
+});
+</script>
+{% endblock %}
