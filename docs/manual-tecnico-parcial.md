@@ -1,210 +1,190 @@
-# Manual Técnico Parcial — Sistema de Reconhecimento Facial Simplificado
+# Manual Técnico Parcial — Catraca de Reconhecimento Facial UBM
 
-Este documento apresenta a documentação técnica parcial da versão simplificada do sistema de Detecção, Cadastro e Reconhecimento Facial, estruturada em duas seções:
-- **Seção 1:** Especificações Técnicas e Dependências
-- **Seção 2:** Guia de Módulos, Funções e Rotas da API
+Versão: 1.0 · Data: 20/11/2026 · Repositório: https://github.com/Matheus-OV/Catraca-de-Reconhecimento-Facial-UBM
 
----
+## 1. Público-alvo e tarefas
 
-## Seção 1: Especificações Técnicas e Dependências
+Este manual se destina a: desenvolvedor que vai assumir a manutenção do sistema ou integrar a catraca física do campus ao sistema de reconhecimento facial.
 
-### 1.1 Visão Geral da Arquitetura
-A versão simplificada foi projetada sob uma arquitetura monolítica modular de três camadas (**Apresentação Web**, **Processamento de Visão Computacional** e **Persistência Local**), eliminando serviços externos complexos presentes na versão original (como servidor PostgreSQL dedicado, compilação nativa de `dlib` e modelos pesados de tradução de áudio Whisper e geração de legendas via LLM).
+Ao final da leitura, essa pessoa deve conseguir:
 
+- integrar um novo cliente (a catraca física ou uma nova tela) às rotas existentes da API para cadastrar pessoas e reconhecer rostos (resolvida na seção 2)
+- alterar o cadastro ou o reconhecimento facial sem quebrar as regras que decidem quem é liberado e quem é "Desconhecido" (resolvida na seção 3)
+
+Para instalar e executar o sistema, consulte o [README](../README.md).
+
+## 2. Referência da API
+
+### Visão geral
+
+Esta referência cobre as 5 rotas REST usadas pelas telas de webcam, cadastro e pessoas, que são as mesmas que um cliente externo, como a catraca, deve usar. Nenhuma rota exige autenticação. Endereço base: http://localhost:8000 (a porta pode ser alterada pela variável de ambiente `PORT`). As rotas `POST` recebem `multipart/form-data` e todas as rotas respondem em JSON.
+
+#### POST /api/analyze
+
+Detecta todos os rostos de uma imagem e informa quem foi reconhecido entre as pessoas cadastradas.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+|---|---|---|---|
+| image | arquivo (JPEG, PNG ou WebP) | Sim | Foto ou quadro da webcam a ser analisado |
+| record | texto (`true` ou `false`) | Não | Se `true`, salva a análise no histórico de detecções. Padrão: `false` |
+| blur | texto (`true` ou `false`) | Não | Se `true`, desfoca os rostos na imagem devolvida. Padrão: `false` |
+
+Exemplo de requisição:
+
+```bash
+curl -X POST http://localhost:8000/api/analyze \
+  -F "image=@examples/img.jpg" \
+  -F "record=true"
 ```
-+-------------------------------------------------------------------+
-|                   Camada de Apresentação (Web)                    |
-|     HTML5 + Canvas Webcam + Fetch API (Templates Jinja2/Flask)    |
-+---------------------------------+---------------------------------+
-                                  | HTTP / Multipart / JSON
-                                  v
-+-------------------------------------------------------------------+
-|                Camada de Aplicação e Visão (Python)               |
-|  app.py (Controlador Flask)  <--->  vision.py (OpenCV + NumPy)    |
-+---------------------------------+---------------------------------+
-                                  | SQL Nativo (sqlite3)
-                                  v
-+-------------------------------------------------------------------+
-|                    Camada de Persistência Local                   |
-|        db.py -> reconhecimento.db (SQLite) + pasta photos/        |
-+-------------------------------------------------------------------+
+
+Resposta de sucesso: 200 OK, com a quantidade de rostos, os nomes reconhecidos, a posição (`box`: x, y, largura, altura) e a confiança de cada rosto, além da imagem anotada em Base64. Exemplo real com `examples/img.jpg`, após cadastrar uma pessoa:
+
+```json
+{
+  "success": true,
+  "faces_count": 4,
+  "recognized_names": ["Maria Silva"],
+  "faces": [
+    { "box": [269, 392, 226, 226], "name": "Maria Silva", "confidence": 100.0 },
+    { "box": [284, 94, 218, 218], "name": "Desconhecido", "confidence": 0.0 }
+  ],
+  "annotated_image_b64": "/9j/4AAQSkZJRgABAQAA..."
+}
 ```
 
-### 1.2 Stack Tecnológica e Dependências
+Erros possíveis: 400 com `"Nenhuma imagem enviada."` quando o campo `image` não é enviado; 400 com `"Arquivo de imagem inválido ou corrompido."` quando o arquivo não é uma imagem; 413 quando o arquivo passa de 16 MB.
 
-| Componente | Tecnologia / Pacote | Versão Mínima | Papel no Sistema |
-| :--- | :--- | :--- | :--- |
-| **Linguagem Base** | Python | `>= 3.10` | Execução do backend e processamento matricial |
-| **Servidor Web** | `flask` | `>= 3.0.0` | Roteamento HTTP, renderização de templates HTML e API JSON |
-| **Visão Computacional** | `opencv-python` (`cv2`) | `4.13.0.92` | Detecção facial via Haar Cascade, CLAHE, gradientes Sobel e manipulação de imagem |
-| **Álgebra Linear** | `numpy` | `>= 1.26.0` | Geração, normalização L2 e cálculo de distância euclidiana dos embeddings |
-| **Banco de Dados** | `sqlite3` (Stdlib) | Nativo do Python | Armazenamento relacional local de pessoas, embeddings binários e histórico |
+#### POST /api/register
 
-### 1.3 Comparativo Técnico de Simplificação
+Cadastra uma pessoa a partir do nome e de uma foto do rosto.
 
-| Aspecto | Projeto Original (`Reconhecimento_Facial-main`) | Versão Simplificada |
-| :--- | :--- | :--- |
-| **Banco de Dados** | PostgreSQL externo obrigatório (`POSTGRES_DSN`, `psycopg2`) | SQLite3 nativo em arquivo único (`reconhecimento.db`), zero configuração |
-| **Dependências Python** | 16 pacotes (`torch>=2.6`, `transformers`, `ultralytics`, `mediapipe`, `face_recognition`, `sounddevice` etc.) | Apenas 3 pacotes com pacotes binários pré-compilados (`flask`, `opencv-python`, `numpy`) |
-| **Tempo de Inicialização** | Alto (download de múltiplos GB de pesos da Hugging Face e compilação C++) | Segundos via `./iniciar.sh` |
-| **Interface de Uso** | Múltiplos submenus CLI (`questionary`) + 14 templates Flask dispersos | Interface Web unificada em 4 telas claras + API REST JSON |
+| Parâmetro | Tipo | Obrigatório | Descrição |
+|---|---|---|---|
+| name | texto | Sim | Nome da pessoa. Espaços no início e no fim são removidos |
+| image | arquivo (JPEG, PNG ou WebP) | Sim | Foto com o rosto da pessoa, de preferência frontal e bem iluminada |
 
-### 1.4 Pipeline de Detecção e Extração de Embeddings
-1. **Pré-processamento e Detecção (`detect_face_boxes`):**
-   - A imagem recebida é convertida para escala de cinza (`COLOR_BGR2GRAY`) e submetida à equalização global de histograma (`cv2.equalizeHist`) para reduzir variações de iluminação.
-   - O classificador `haarcascade_frontalface_default.xml` localiza as regiões faciais, ordenando os rostos detectados em ordem decrescente de área `(w * h)`.
-2. **Extração do Descritor Facial de 128 Dimensões (`extract_face_embedding`):**
-   - O recorte facial tem 10% de suas bordas externas aparadas para remover interferências de fundo, é redimensionado para `64x64` pixels e normalizado com **CLAHE** (*Contrast Limited Adaptive Histogram Equalization*).
-   - São extraídos e concatenados três vetores complementares:
-     - **64 dimensões:** Grade espacial `8x8` normalizada por média zero e desvio padrão unitário (peso `0.50`).
-     - **48 dimensões:** Magnitudes dos gradientes horizontais e verticais de Sobel amostradas em grade `6x4` e normalizadas por norma L2 (peso `0.35`).
-     - **16 dimensões:** Histograma de distribuição tonal de 16 faixas normalizado por norma L2 (peso `0.15`).
-   - O vetor resultante de `128` posições (`float64`) é normalizado para norma L2 unitária (`||v|| = 1.0`).
-3. **Comparação e Reconhecimento (`match_embedding`):**
-   - Calcula-se a distância euclidiana `d = ||e_consulta - e_cadastrado||_2` contra todos os registros da tabela `people`.
-   - Caso a menor distância seja inferior ou igual a `RF_THRESHOLD` (padrão `0.45`), a identidade correspondente é atribuída com pontuação de similaridade `(1 - d) * 100%`.
+Exemplo de requisição:
 
-### 1.5 Esquema do Banco de Dados (`reconhecimento.db`)
-- **Tabela `people`:**
-  - `id` (`INTEGER PRIMARY KEY AUTOINCREMENT`) — Identificador único da pessoa.
-  - `name` (`TEXT NOT NULL`) — Nome da pessoa cadastrada.
-  - `embedding` (`BLOB NOT NULL`) — Vetor numpy `float64` de 128 dimensões serializado em bytes (`1024 bytes`).
-  - `photo` (`BLOB`) — Imagem JPEG do rosto recortado no momento do cadastro.
-  - `created_at` (`TIMESTAMP DEFAULT CURRENT_TIMESTAMP`) — Data e hora do cadastro.
-- **Tabela `detections`:**
-  - `id` (`INTEGER PRIMARY KEY AUTOINCREMENT`) — Identificador único do evento.
-  - `image_name` (`TEXT`) — Nome do arquivo ou origem (`webcam_frame.jpg`).
-  - `faces_count` (`INTEGER NOT NULL`) — Total de rostos detectados na imagem.
-  - `recognized_names` (`TEXT`) — Lista de nomes reconhecidos separados por vírgula.
-  - `created_at` (`TIMESTAMP DEFAULT CURRENT_TIMESTAMP`) — Data e hora da detecção.
+```bash
+curl -X POST http://localhost:8000/api/register \
+  -F "name=Maria Silva" \
+  -F "image=@examples/img.jpg"
+```
 
----
+Resposta de sucesso: 200 OK, com o `person_id` gerado, o nome, a posição do rosto usado no cadastro e o recorte do rosto em Base64.
 
-## Seção 2: Guia de Módulos, Funções e Rotas da API
+```json
+{
+  "success": true,
+  "person_id": 1,
+  "name": "Maria Silva",
+  "box": [269, 392, 226, 226],
+  "photo_b64": "/9j/4AAQSkZJRgABAQAA..."
+}
+```
 
-### 2.1 Módulo de Persistência (`db.py`)
-Responsável pela criação automática do banco SQLite e pelas operações CRUD sobre pessoas e detecções.
+Erros possíveis: 400 com `"Informe o nome e envie a imagem."` quando falta o nome (ou ele só tem espaços) ou a imagem; 400 com `"Nenhum rosto foi detectado na imagem enviada. Tente uma foto frontal bem iluminada."` quando a foto não tem rosto; 400 com `"Arquivo de imagem inválido ou corrompido."` quando o arquivo não é uma imagem; 413 quando o arquivo passa de 16 MB.
 
-| Função | Assinatura | Descrição e Retorno |
-| :--- | :--- | :--- |
-| `get_conn` | `get_conn() -> Generator[sqlite3.Connection, None, None]` | Gerenciador de contexto que abre e fecha conexões seguras ao arquivo SQLite com `sqlite3.Row`. |
-| `init_db` | `init_db() -> None` | Cria as tabelas `people` e `detections` caso não existam. Executado automaticamente no início. |
-| `add_person` | `add_person(name: str, embedding_bytes: bytes, photo_bytes: bytes) -> int` | Insere uma nova pessoa com seu vetor facial e foto recortada. Retorna o `id` gerado. |
-| `get_all_people` | `get_all_people() -> list[dict[str, Any]]` | Retorna todas as pessoas cadastradas contendo `id`, `name`, `embedding` (bytes), `photo_b64` (string Base64) e `created_at`. |
-| `delete_person` | `delete_person(person_id: int) -> bool` | Exclui o registro da pessoa correspondente ao `person_id`. Retorna `True` se removido com sucesso. |
-| `save_detection` | `save_detection(image_name: str, faces_count: int, recognized_names: list[str]) -> int` | Registra uma execução de detecção/reconhecimento no histórico e retorna o `id` do evento. |
-| `list_detections` | `list_detections(limit: int = 50) -> list[dict[str, Any]]` | Lista os últimos `limit` eventos de detecção em ordem decrescente de ID. |
+#### GET /api/people
 
----
+Lista todas as pessoas cadastradas, em ordem alfabética.
 
-### 2.2 Módulo de Visão Computacional (`vision.py`)
-Concentra o processamento de imagens, detecção facial, extração de descritores e anotação visual.
+| Parâmetro | Tipo | Obrigatório | Descrição |
+|---|---|---|---|
+| (nenhum) | — | — | Esta rota não recebe parâmetros |
 
-| Função | Assinatura | Descrição e Retorno |
-| :--- | :--- | :--- |
-| `decode_image_bytes` | `decode_image_bytes(image_bytes: bytes) -> np.ndarray` | Decodifica bytes brutos de imagem em matriz BGR do OpenCV. Lança `ValueError` se inválida. |
-| `encode_image_base64` | `encode_image_base64(img: np.ndarray) -> str` | Codifica uma matriz BGR em JPEG e retorna sua representação textual em Base64. |
-| `detect_face_boxes` | `detect_face_boxes(img: np.ndarray, scale_factor=1.1, min_neighbors=5, min_size=(40, 40)) -> list[tuple[int, int, int, int]]` | Localiza todos os rostos na imagem e retorna lista de tuplas `(x, y, w, h)` ordenada do maior para o menor rosto. |
-| `extract_face_embedding` | `extract_face_embedding(face_bgr: np.ndarray) -> np.ndarray` | Gera o descritor facial normalizado de 128 dimensões (`dtype=float64`) a partir do recorte BGR de um rosto. |
-| `match_embedding` | `match_embedding(face_enc: np.ndarray, known_people: list[dict], threshold: float \| None = None) -> tuple[str, float]` | Compara `face_enc` com a lista de pessoas cadastradas. Retorna `(nome, similaridade_percentual)`. |
-| `register_person_from_bytes` | `register_person_from_bytes(name: str, image_bytes: bytes) -> dict[str, Any]` | Detecta o rosto principal na foto enviada, extrai o embedding, salva o recorte em `photos/` e persiste no banco SQLite. |
-| `analyze_image_bytes` | `analyze_image_bytes(image_bytes: bytes, image_name="upload.jpg", blur_faces=False, record_history=True) -> dict[str, Any]` | Executa detecção e reconhecimento em todos os rostos da imagem, desenha caixas delimitadoras (ou aplica desfoque) e retorna os metadados e a imagem anotada em Base64. |
+Exemplo de requisição:
 
----
+```bash
+curl http://localhost:8000/api/people
+```
 
-### 2.3 Aplicação Web e Rotas da API (`app.py`)
+Resposta de sucesso: 200 OK, com o total (`count`) e a lista de pessoas com `id`, `name`, `created_at` (horário UTC) e `photo_b64`. O embedding facial não é devolvido.
 
-#### Rotas de Interface Web (HTML)
+```json
+{
+  "count": 1,
+  "people": [
+    { "id": 1, "name": "Maria Silva", "created_at": "2026-11-20 22:45:48", "photo_b64": "/9j/4AAQSkZJRgA..." }
+  ]
+}
+```
 
-| Método | Rota | Template Renderizado | Descrição |
-| :--- | :--- | :--- | :--- |
-| `GET`, `POST` | `/` | `templates/index.html` | Página inicial para envio de foto, detecção de rostos, reconhecimento de pessoas cadastradas e modo privacidade (desfoque). |
-| `GET` | `/webcam` | `templates/webcam.html` | Interface de monitoramento em tempo real via webcam com sobreposição gráfica em `<canvas>`. |
-| `GET`, `POST` | `/register` | `templates/register.html` | Formulário de cadastro de nova pessoa via upload de arquivo ou captura direta da webcam. |
-| `GET` | `/people` | `templates/people.html` | Painel de gerenciamento de pessoas cadastradas (com exclusão) e tabela de histórico de detecções. |
+Erros possíveis: esta rota não tem erros previstos. Sem cadastros, ela devolve `count: 0` e a lista vazia.
 
-#### Rotas da API REST (JSON)
+#### DELETE /api/people/{id}
 
-1. **`POST /api/analyze`**
-   - **Descrição:** Processa uma imagem enviada via `multipart/form-data` para detecção e reconhecimento facial.
-   - **Parâmetros (`form-data`):**
-     - `image` (arquivo obrigatório): Imagem JPEG/PNG/WebP.
-     - `record` (opcional, `"true"` ou `"false"`): Define se a análise deve ser salva na tabela `detections`.
-     - `blur` (opcional, `"true"` ou `"false"`): Aplica desfoque gaussiano nos rostos detectados.
-   - **Exemplo de Resposta (`200 OK`):**
-     ```json
-     {
-       "success": true,
-       "faces_count": 1,
-       "recognized_names": ["Maria Silva"],
-       "faces": [
-         {
-           "box": [142, 88, 164, 164],
-           "name": "Maria Silva",
-           "confidence": 84.5
-         }
-       ],
-       "annotated_image_b64": "/9j/4AAQSkZJRgABAQAAAQABAAD..."
-     }
-     ```
+Remove a pessoa cadastrada com o `id` informado. A rota também aceita o método `POST`.
 
-2. **`POST /api/register`**
-   - **Descrição:** Cadastra uma nova pessoa a partir de seu nome e imagem facial.
-   - **Parâmetros (`form-data`):**
-     - `name` (texto obrigatório): Nome da pessoa.
-     - `image` (arquivo obrigatório): Foto contendo o rosto da pessoa.
-   - **Exemplo de Resposta (`200 OK`):**
-     ```json
-     {
-       "success": true,
-       "person_id": 1,
-       "name": "Maria Silva",
-       "box": [142, 88, 164, 164],
-       "photo_b64": "/9j/4AAQSkZJRgABAQAAAQABAAD..."
-     }
-     ```
+| Parâmetro | Tipo | Obrigatório | Descrição |
+|---|---|---|---|
+| id | inteiro (na rota) | Sim | `id` da pessoa, obtido em `GET /api/people` |
 
-3. **`GET /api/people`**
-   - **Descrição:** Lista todas as pessoas cadastradas no banco SQLite.
-   - **Exemplo de Resposta (`200 OK`):**
-     ```json
-     {
-       "count": 1,
-       "people": [
-         {
-           "id": 1,
-           "name": "Maria Silva",
-           "created_at": "2026-11-13 09:25:00",
-           "photo_b64": "/9j/4AAQSkZJRgABAQAAAQABAAD..."
-         }
-       ]
-     }
-     ```
+Exemplo de requisição:
 
-4. **`DELETE /api/people/<int:person_id>`**
-   - **Descrição:** Remove uma pessoa cadastrada pelo seu `id`.
-   - **Exemplo de Resposta (`200 OK`):**
-     ```json
-     {
-       "success": true,
-       "deleted_id": 1
-     }
-     ```
+```bash
+curl -X DELETE http://localhost:8000/api/people/1
+```
 
-5. **`GET /api/detections`**
-   - **Descrição:** Retorna os registros mais recentes do histórico de detecções (parâmetro de query opcional `?limit=50`).
-   - **Exemplo de Resposta (`200 OK`):**
-     ```json
-     {
-       "count": 1,
-       "detections": [
-         {
-           "id": 1,
-           "image_name": "img.jpg",
-           "faces_count": 1,
-           "recognized_names": "Maria Silva",
-           "created_at": "2026-11-13 09:26:12"
-         }
-       ]
-     }
-     ```
+Resposta de sucesso: 200 OK, com `"success": true` e o `deleted_id`.
+
+```json
+{ "success": true, "deleted_id": 1 }
+```
+
+Erros possíveis: 200 OK com `"success": false` quando não existe pessoa com esse `id` (a rota não devolve 404 nesse caso); 404 quando o `id` não é um número inteiro.
+
+#### GET /api/detections
+
+Lista o histórico mais recente de detecções, da mais nova para a mais antiga.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+|---|---|---|---|
+| limit | inteiro (na query string) | Não | Quantidade máxima de registros. Padrão: 50 |
+
+Exemplo de requisição:
+
+```bash
+curl "http://localhost:8000/api/detections?limit=5"
+```
+
+Resposta de sucesso: 200 OK, com o total (`count`) e os registros com `id`, `image_name`, `faces_count`, `recognized_names` (texto separado por vírgula, ou `"Nenhum"`) e `created_at` (horário UTC).
+
+```json
+{
+  "count": 1,
+  "detections": [
+    { "id": 1, "image_name": "img.jpg", "faces_count": 4, "recognized_names": "Maria Silva", "created_at": "2026-11-20 22:45:48" }
+  ]
+}
+```
+
+Erros possíveis: 500 Internal Server Error quando `limit` não é um número inteiro (ex.: `?limit=abc`).
+
+## 3. Regras de negócio
+
+### Visão geral
+
+Estas são as regras que o código aplica hoje no cadastro e no reconhecimento facial. Elas vêm do objetivo do projeto (substituir a carteirinha por reconhecimento facial no controle de acesso ao campus) e foram conferidas no código e em testes com as imagens da pasta `examples/`.
+
+| Código | Regra | Onde é aplicada no código | Exemplo do que acontece |
+|---|---|---|---|
+| RN01 | Toda pessoa cadastrada precisa ter um nome que não esteja vazio | `app.py` (`register_page`, `api_register`) e `vision.py` (`register_person_from_bytes`) | Cadastrar com o nome `"   "` retorna 400 com `"Informe o nome e envie a imagem."` |
+| RN02 | Só é possível cadastrar uma foto em que um rosto seja detectado | `vision.py` (`register_person_from_bytes`) | Uma foto sem rosto retorna 400 com `"Nenhum rosto foi detectado na imagem enviada..."` e nada é salvo |
+| RN03 | Se a foto do cadastro tiver vários rostos, apenas o maior (mais próximo da câmera) é cadastrado | `vision.py` (`detect_face_boxes` ordena por área; `register_person_from_bytes` usa o primeiro) | Com `examples/img.jpg` (4 rostos), só o rosto de 226 x 226 pixels foi cadastrado |
+| RN04 | Um rosto só é reconhecido se a distância até o cadastro mais parecido for menor ou igual ao limiar `RF_THRESHOLD` (padrão `0.45`); senão, ele é "Desconhecido" | `vision.py` (`match_embedding`) | Rostos não cadastrados voltam como `"Desconhecido"` com confiança `0.0`. Aumentar o limiar faz o sistema confundir pessoas parecidas |
+| RN05 | A confiança do reconhecimento é calculada como `(1 - distância) x 100`, entre 0 e 100 | `vision.py` (`match_embedding`) | A mesma foto usada no cadastro é reconhecida com confiança `100.0` |
+| RN06 | Rostos menores que 40 x 40 pixels não são detectados | `vision.py` (`detect_face_boxes`, `min_size=(40, 40)`) | Uma pessoa muito longe da câmera não é contada em `faces_count` |
+| RN07 | A imagem enviada precisa ser um arquivo de imagem válido de até 16 MB | `vision.py` (`decode_image_bytes`) e `app.py` (`MAX_CONTENT_LENGTH`) | Um arquivo que não é imagem retorna 400; um arquivo maior que 16 MB retorna 413 |
+| RN08 | Análises feitas pela página inicial sempre entram no histórico; pela API, só quando `record=true`. Os quadros da tela de webcam não são registrados | `app.py` (`index`, `api_analyze`) e `templates/webcam.html` | Analisar uma foto pela API sem `record` não cria registro em `GET /api/detections` |
+| RN09 | No modo privacidade (`blur`), os rostos são desfocados e nenhum nome é desenhado na imagem, mas o reconhecimento continua sendo feito e devolvido no JSON | `vision.py` (`analyze_image_bytes`) | Com `blur=true`, a imagem volta desfocada e `recognized_names` continua preenchido |
+
+## 4. Próximas seções previstas
+
+| Seção prevista | Quando será incluída |
+|---|---|
+| Arquitetura básica | Entrega final do semestre |
+| Estrutura do banco de dados | Entrega final do semestre |
+| Implantação no servidor | Entrega final do semestre |
+| Solução de problemas | Entrega final do semestre |
+| Guia de manutenção | Entrega final do semestre |
