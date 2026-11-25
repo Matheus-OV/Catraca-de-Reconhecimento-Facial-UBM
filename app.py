@@ -5,8 +5,12 @@ from __future__ import annotations
 import os
 from flask import Flask, jsonify, render_template, request
 
-from db import delete_person, get_all_people, init_db, list_detections
-from vision import analyze_image_bytes, register_person_from_bytes
+from db import SITUACOES, get_all_people, init_db, list_detections, update_situacao
+from vision import (
+    analyze_image_bytes,
+    delete_person_with_files,
+    register_person_from_bytes,
+)
 
 app = Flask(__name__)
 app.config["TEMPLATES_AUTO_RELOAD"] = True
@@ -14,6 +18,11 @@ app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # Limite de 16 MB por uploa
 
 # Inicializa automaticamente o banco SQLite na partida
 init_db()
+
+
+def _is_checked(value: str | None) -> bool:
+    """Interpreta o valor de uma caixa de seleção/campo booleano de formulário."""
+    return (value or "").strip().lower() in ("on", "true", "1", "sim")
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -50,20 +59,31 @@ def register_page():
     """Página de cadastro de pessoas (por upload de arquivo ou captura da webcam)."""
     if request.method == "POST":
         name = request.form.get("name", "").strip()
+        matricula = request.form.get("matricula", "").strip()
+        situacao = request.form.get("situacao", "ativa")
+        consent = _is_checked(request.form.get("consent"))
         file = request.files.get("image")
         if not name or not file or not file.filename:
             return render_template(
-                "register.html", error="Informe o nome e selecione uma foto."
+                "register.html",
+                error="Informe o nome e selecione uma foto.",
+                situacoes=SITUACOES,
             )
         try:
-            res = register_person_from_bytes(name, file.read())
+            res = register_person_from_bytes(
+                name, file.read(), matricula=matricula, situacao=situacao, consent=consent
+            )
             if not res.get("success"):
-                return render_template("register.html", error=res.get("error"))
-            return render_template("register.html", registered=res)
+                return render_template(
+                    "register.html", error=res.get("error"), situacoes=SITUACOES
+                )
+            return render_template("register.html", registered=res, situacoes=SITUACOES)
         except Exception as exc:  # noqa: BLE001
-            return render_template("register.html", error=f"Erro no cadastro: {exc}")
+            return render_template(
+                "register.html", error=f"Erro no cadastro: {exc}", situacoes=SITUACOES
+            )
 
-    return render_template("register.html")
+    return render_template("register.html", situacoes=SITUACOES)
 
 
 @app.route("/people")
@@ -71,7 +91,9 @@ def people_page():
     """Página de listagem/exclusão de pessoas cadastradas e histórico de detecções."""
     people = get_all_people()
     detections = list_detections(limit=30)
-    return render_template("people.html", people=people, detections=detections)
+    return render_template(
+        "people.html", people=people, detections=detections, situacoes=SITUACOES
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +124,11 @@ def api_analyze():
 
 @app.route("/api/register", methods=["POST"])
 def api_register():
-    """Cadastra uma pessoa via API (usado pela captura da webcam e clientes REST)."""
+    """Cadastra uma pessoa via API (usado pela captura da webcam e clientes REST).
+
+    Campos: name, matricula, image (obrigatórios); consent (`true` = aceitou o
+    termo, obrigatório); situacao (padrão `ativa`, só `ativa` pode ser cadastrada).
+    """
     name = request.form.get("name", "").strip()
     file = request.files.get("image")
     if not name or not file:
@@ -111,7 +137,13 @@ def api_register():
             400,
         )
     try:
-        res = register_person_from_bytes(name, file.read())
+        res = register_person_from_bytes(
+            name,
+            file.read(),
+            matricula=request.form.get("matricula", "").strip(),
+            situacao=request.form.get("situacao", "ativa"),
+            consent=_is_checked(request.form.get("consent")),
+        )
         status = 200 if res.get("success") else 400
         return jsonify(res), status
     except Exception as exc:  # noqa: BLE001
@@ -127,6 +159,9 @@ def api_list_people():
             "id": p["id"],
             "name": p["name"],
             "created_at": p["created_at"],
+            "matricula": p["matricula"],
+            "situacao": p["situacao"],
+            "consent_at": p["consent_at"],
             "photo_b64": p["photo_b64"],
         }
         for p in people
@@ -136,9 +171,29 @@ def api_list_people():
 
 @app.route("/api/people/<int:person_id>", methods=["DELETE", "POST"])
 def api_delete_person(person_id: int):
-    """Remove uma pessoa cadastrada pelo seu ID."""
-    removed = delete_person(person_id)
+    """Remove uma pessoa cadastrada pelo seu ID (banco e foto em disco)."""
+    removed = delete_person_with_files(person_id)
     return jsonify({"success": removed, "deleted_id": person_id})
+
+
+@app.route("/api/people/<int:person_id>/situacao", methods=["POST", "PATCH"])
+def api_update_situacao(person_id: int):
+    """Altera a situação da matrícula (ativa, trancada, cancelada ou formada)."""
+    payload = request.get_json(silent=True) or request.form
+    situacao = (payload.get("situacao") or "").strip().lower()
+    if situacao not in SITUACOES:
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": f"Situação inválida. Use: {', '.join(SITUACOES)}.",
+                }
+            ),
+            400,
+        )
+    updated = update_situacao(person_id, situacao)
+    status = 200 if updated else 404
+    return jsonify({"success": updated, "id": person_id, "situacao": situacao}), status
 
 
 @app.route("/api/detections", methods=["GET"])
