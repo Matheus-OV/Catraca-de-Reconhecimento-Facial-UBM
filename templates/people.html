@@ -10,6 +10,9 @@
                 <tr>
                     <th>Foto</th>
                     <th>Nome</th>
+                    <th>Matrícula</th>
+                    <th>Situação</th>
+                    <th>Consentimento</th>
                     <th>Data de Cadastro</th>
                     <th>Ação</th>
                 </tr>
@@ -25,6 +28,15 @@
                         {% endif %}
                     </td>
                     <td><strong>{{ p.name }}</strong></td>
+                    <td>{{ p.matricula or '—' }}</td>
+                    <td>
+                        <select onchange="changeSituacao({{ p.id }}, this.value)" style="padding: 0.3rem 0.5rem; border: 1px solid var(--border); border-radius: 6px;">
+                            {% for s in situacoes %}
+                            <option value="{{ s }}" {% if s == p.situacao %}selected{% endif %}>{{ s | capitalize }}</option>
+                            {% endfor %}
+                        </select>
+                    </td>
+                    <td>{{ p.consent_at or 'Não registrado' }}</td>
                     <td>{{ p.created_at }}</td>
                     <td>
                         <button class="danger" type="button" onclick="removePerson({{ p.id }})">Remover</button>
@@ -48,6 +60,7 @@
                     <th>Imagem</th>
                     <th>Rostos</th>
                     <th>Reconhecidos</th>
+                    <th>Decisão de acesso</th>
                     <th>Data/Hora</th>
                 </tr>
             </thead>
@@ -58,6 +71,7 @@
                     <td>{{ d.image_name }}</td>
                     <td><span class="badge">{{ d.faces_count }}</span></td>
                     <td>{{ d.recognized_names }}</td>
+                    <td>{{ d.decisions or '—' }}</td>
                     <td>{{ d.created_at }}</td>
                 </tr>
                 {% endfor %}
@@ -68,13 +82,27 @@
 
 <script>
 function removePerson(personId) {
+    if (!confirm('Excluir esta pessoa e apagar o modelo facial e a foto? Esta ação não pode ser desfeita.')) return;
     fetch(`/api/people/${personId}`, { method: 'DELETE' })
         .then(r => r.json())
         .then(res => {
             if (res.success) {
                 const row = document.getElementById(`person-row-${personId}`);
                 if (row) row.remove();
+                alert('Exclusão confirmada: o modelo facial e a foto foram apagados.');
             }
+        });
+}
+
+function changeSituacao(personId, situacao) {
+    fetch(`/api/people/${personId}/situacao`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ situacao })
+    })
+        .then(r => r.json())
+        .then(res => {
+            if (!res.success) alert(res.error || 'Não foi possível alterar a situação.');
         });
 }
 </script>
