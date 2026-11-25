@@ -63,19 +63,24 @@ function captureAndAnalyze() {
                 if (!data.success) return;
 
                 const faces = data.faces || [];
-                statusText.textContent = `Rostos na cena: ${faces.length} | Reconhecidos: ${(data.recognized_names || []).join(', ') || 'Nenhum'}`;
+                const motivos = faces.map(f => `${f.name}: ${f.access} (${f.reason})`).join(' | ');
+                statusText.textContent = `Rostos na cena: ${faces.length} | ${motivos || 'Nenhum rosto'}`;
 
                 faces.forEach(face => {
                     const [x, y, w, h] = face.box;
                     const recognized = face.name && face.name !== 'Desconhecido';
-                    ctx.strokeStyle = recognized ? '#22c55e' : '#f59e0b';
+                    const liberado = face.access === 'liberado';
+                    const cor = liberado ? '#22c55e' : (recognized ? '#dc2626' : '#f59e0b');
+                    ctx.strokeStyle = cor;
                     ctx.lineWidth = 3;
                     ctx.strokeRect(x, y, w, h);
 
-                    const label = recognized ? `${face.name} (${face.confidence.toFixed(0)}%)` : 'Desconhecido';
+                    const label = recognized
+                        ? `${face.name} (${face.confidence.toFixed(0)}%) - ${liberado ? 'LIBERADO' : 'NEGADO'}`
+                        : 'Desconhecido - NEGADO';
                     ctx.font = 'bold 16px sans-serif';
                     const textWidth = ctx.measureText(label).width;
-                    ctx.fillStyle = recognized ? '#16a34a' : '#d97706';
+                    ctx.fillStyle = cor;
                     ctx.fillRect(x, Math.max(0, y - 26), textWidth + 12, 24);
                     ctx.fillStyle = '#ffffff';
                     ctx.fillText(label, x + 6, Math.max(16, y - 8));
