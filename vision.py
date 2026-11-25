@@ -16,7 +16,16 @@ from typing import Any
 import cv2
 import numpy as np
 
-from db import add_person, get_all_people, save_detection
+import sqlite3
+
+from db import (
+    SITUACOES,
+    add_person,
+    delete_person,
+    get_all_people,
+    get_person,
+    save_detection,
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 PHOTOS_DIR = Path(os.getenv("PHOTOS_DIR", str(BASE_DIR / "photos")))
@@ -123,18 +132,18 @@ def extract_face_embedding(face_bgr: np.ndarray) -> np.ndarray:
     return embedding
 
 
-def match_embedding(
+def match_person(
     face_enc: np.ndarray,
     known_people: list[dict[str, Any]],
     threshold: float | None = None,
-) -> tuple[str, float]:
-    """Compara o embedding de um rosto com o banco de pessoas cadastradas.
+) -> tuple[dict[str, Any] | None, float]:
+    """Encontra a pessoa cadastrada mais parecida com o rosto.
 
-    Retorna `(nome, confianca)` onde `nome` é `'Desconhecido'` caso a menor
-    distância euclidiana supere o limiar configurado.
+    Retorna `(pessoa, confianca)`. Se a menor distância euclidiana superar o
+    limiar, retorna `(None, 0.0)` (rosto desconhecido).
     """
     limit = RECOGNITION_THRESHOLD if threshold is None else threshold
-    best_name = "Desconhecido"
+    best_person: dict[str, Any] | None = None
     best_dist = float("inf")
 
     for person in known_people:
@@ -147,19 +156,102 @@ def match_embedding(
         dist = float(np.linalg.norm(known_enc - face_enc))
         if dist < best_dist:
             best_dist = dist
-            best_name = person["name"]
+            best_person = person
 
-    if best_dist <= limit:
+    if best_person is not None and best_dist <= limit:
         confidence = max(0.0, min(100.0, round((1.0 - (best_dist / 1.0)) * 100.0, 1)))
-        return best_name, confidence
-    return "Desconhecido", 0.0
+        return best_person, confidence
+    return None, 0.0
 
 
-def register_person_from_bytes(name: str, image_bytes: bytes) -> dict[str, Any]:
-    """Detecta o rosto principal na imagem, gera o embedding e salva no SQLite."""
+def match_embedding(
+    face_enc: np.ndarray,
+    known_people: list[dict[str, Any]],
+    threshold: float | None = None,
+) -> tuple[str, float]:
+    """Compara o embedding de um rosto com o banco de pessoas cadastradas.
+
+    Retorna `(nome, confianca)` onde `nome` é `'Desconhecido'` caso a menor
+    distância euclidiana supere o limiar configurado.
+    """
+    person, confidence = match_person(face_enc, known_people, threshold)
+    if person is None:
+        return "Desconhecido", 0.0
+    return person["name"], confidence
+
+
+def decide_access(person: dict[str, Any] | None) -> tuple[str, str]:
+    """Decide se o acesso é liberado e informa o motivo.
+
+    Regras: rosto não cadastrado é negado; pessoa cadastrada só é liberada
+    se a situação da matrícula for "ativa" (trancada, cancelada e formada
+    são negadas).
+    """
+    if person is None:
+        return "negado", "Rosto não cadastrado"
+    situacao = person.get("situacao") or "ativa"
+    if situacao == "ativa":
+        return "liberado", "Matrícula ativa"
+    return "negado", f"Matrícula {situacao}"
+
+
+def _safe_name(name: str) -> str:
+    return "".join(c if c.isalnum() or c in "_-" else "_" for c in name)
+
+
+def delete_person_with_files(person_id: int) -> bool:
+    """Remove a pessoa do banco e apaga também o arquivo da foto em `photos/`.
+
+    Atende ao pedido de exclusão dos dados biométricos (LGPD): o vetor facial
+    sai do banco e o recorte do rosto sai do disco.
+    """
+    person = get_person(person_id)
+    if person is None:
+        return False
+    removed = delete_person(person_id)
+    if removed:
+        for f in PHOTOS_DIR.glob(f"{person_id}_*.jpg"):
+            f.unlink(missing_ok=True)
+        # Arquivo no formato antigo (só o nome), se nenhuma outra pessoa o usa.
+        others = [p for p in get_all_people() if p["name"] == person["name"]]
+        if not others:
+            (PHOTOS_DIR / f"{_safe_name(person['name'])}.jpg").unlink(missing_ok=True)
+    return removed
+
+
+def register_person_from_bytes(
+    name: str,
+    image_bytes: bytes,
+    matricula: str = "",
+    situacao: str = "ativa",
+    consent: bool = False,
+) -> dict[str, Any]:
+    """Valida o cadastro, detecta o rosto principal, gera o embedding e salva no SQLite.
+
+    Regras: nome e matrícula obrigatórios; só é possível cadastrar com a
+    matrícula ativa; o termo de consentimento (LGPD) precisa ser aceito.
+    """
     clean_name = name.strip()
+    clean_matricula = (matricula or "").strip()
     if not clean_name:
         return {"success": False, "error": "O nome da pessoa é obrigatório."}
+    if not clean_matricula:
+        return {"success": False, "error": "Informe a matrícula."}
+    if situacao not in SITUACOES:
+        return {
+            "success": False,
+            "error": f"Situação inválida. Use: {', '.join(SITUACOES)}.",
+        }
+    if situacao != "ativa":
+        return {
+            "success": False,
+            "error": "Só é possível cadastrar pessoas com matrícula ativa.",
+        }
+    if not consent:
+        return {
+            "success": False,
+            "error": "É necessário aceitar o termo de consentimento para o uso da imagem do rosto.",
+        }
 
     img = decode_image_bytes(image_bytes)
     boxes = detect_face_boxes(img)
@@ -178,15 +270,28 @@ def register_person_from_bytes(name: str, image_bytes: bytes) -> dict[str, Any]:
         return {"success": False, "error": "Erro ao processar recorte do rosto."}
 
     photo_bytes = crop_buf.tobytes()
-    safe_filename = "".join(c if c.isalnum() or c in "_-" else "_" for c in clean_name)
-    photo_file = PHOTOS_DIR / f"{safe_filename}.jpg"
+    try:
+        person_id = add_person(
+            clean_name,
+            embedding.tobytes(),
+            photo_bytes,
+            matricula=clean_matricula,
+            situacao=situacao,
+            consented=True,
+        )
+    except sqlite3.IntegrityError:
+        return {"success": False, "error": "Já existe uma pessoa cadastrada com essa matrícula."}
+
+    # O arquivo leva o id no nome: pessoas com o mesmo nome não se sobrescrevem.
+    photo_file = PHOTOS_DIR / f"{person_id}_{_safe_name(clean_name)}.jpg"
     photo_file.write_bytes(photo_bytes)
 
-    person_id = add_person(clean_name, embedding.tobytes(), photo_bytes)
     return {
         "success": True,
         "person_id": person_id,
         "name": clean_name,
+        "matricula": clean_matricula,
+        "situacao": situacao,
         "box": [x, y, w, h],
         "photo_b64": base64.b64encode(photo_bytes).decode("utf-8"),
     }
@@ -210,26 +315,34 @@ def analyze_image_bytes(
 
     faces_info: list[dict[str, Any]] = []
     recognized_names: list[str] = []
+    decisions: list[str] = []
 
     for x, y, w, h in boxes:
         crop = img[y : y + h, x : x + w]
         emb = extract_face_embedding(crop)
-        name, confidence = match_embedding(emb, known_people)
+        person, confidence = match_person(emb, known_people)
+        name = person["name"] if person else "Desconhecido"
+        access, reason = decide_access(person)
 
-        if name != "Desconhecido":
+        if person is not None:
             recognized_names.append(name)
+        decisions.append(f"{name}: {access} ({reason})")
 
         if blur_faces:
             roi = annotated[y : y + h, x : x + w]
             annotated[y : y + h, x : x + w] = cv2.GaussianBlur(roi, (99, 99), 30)
         else:
-            color = (40, 180, 99) if name != "Desconhecido" else (0, 165, 255)
+            if access == "liberado":
+                color = (40, 180, 99)  # verde
+            elif person is not None:
+                color = (60, 60, 220)  # vermelho: cadastrado, mas matrícula não ativa
+            else:
+                color = (0, 165, 255)  # laranja: desconhecido
             cv2.rectangle(annotated, (x, y), (x + w, y + h), color, 2)
-            label = (
-                f"{name} ({confidence:.0f}%)"
-                if name != "Desconhecido"
-                else "Rosto Detectado"
-            )
+            if person is not None:
+                label = f"{name} ({confidence:.0f}%) - {access.upper()}"
+            else:
+                label = "Rosto Detectado - NEGADO"
             cv2.putText(
                 annotated,
                 label,
@@ -245,13 +358,23 @@ def analyze_image_bytes(
                 "box": [x, y, w, h],
                 "name": name,
                 "confidence": confidence,
+                "person_id": person["id"] if person else None,
+                "access": access,
+                "reason": reason,
             }
         )
 
     if record_history:
-        save_detection(image_name, len(boxes), recognized_names)
+        save_detection(image_name, len(boxes), recognized_names, decisions)
+
+    # Decisão geral (usada pela catraca): vale a do maior rosto, o mais próximo da câmera.
+    if faces_info:
+        decision = {"access": faces_info[0]["access"], "reason": faces_info[0]["reason"]}
+    else:
+        decision = {"access": "negado", "reason": "Nenhum rosto detectado"}
 
     return {
+        "decision": decision,
         "faces_count": len(boxes),
         "recognized_names": recognized_names,
         "faces": faces_info,
