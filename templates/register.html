@@ -12,7 +12,7 @@
 
     {% if registered %}
         <div class="alert alert-success">
-            Pessoa <strong>{{ registered.name }}</strong> (ID #{{ registered.person_id }}) cadastrada com sucesso!
+            Pessoa <strong>{{ registered.name }}</strong> (matrícula {{ registered.matricula }}, ID #{{ registered.person_id }}) cadastrada com sucesso!
             <div style="margin-top: 0.75rem;">
                 <img src="data:image/jpeg;base64,{{ registered.photo_b64 }}" alt="{{ registered.name }}" style="width: 110px; height: 110px; object-fit: cover; border-radius: 8px; border: 2px solid #16a34a;">
             </div>
@@ -26,8 +26,29 @@
             <input type="text" id="name" name="name" placeholder="Ex.: Maria Silva" required>
         </div>
         <div class="form-group">
+            <label for="matricula">Matrícula:</label>
+            <input type="text" id="matricula" name="matricula" placeholder="Ex.: 20260123" required>
+        </div>
+        <div class="form-group">
+            <label for="situacao">Situação da matrícula:</label>
+            <select id="situacao" name="situacao" style="padding: 0.55rem 0.75rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.95rem;">
+                {% for s in situacoes %}
+                <option value="{{ s }}" {% if s == 'ativa' %}selected{% endif %}>{{ s | capitalize }}</option>
+                {% endfor %}
+            </select>
+            <small style="display:block; color: var(--muted);">Só é possível cadastrar pessoas com matrícula ativa.</small>
+        </div>
+        <div class="form-group">
             <label for="image">Foto com o rosto visível:</label>
             <input type="file" id="image" name="image" accept="image/*" required>
+        </div>
+    <div class="alert" style="background:#f8fafc; border:1px solid var(--border); font-weight: normal; font-size: 0.9rem;">
+        <strong>Termo de consentimento (LGPD):</strong> autorizo o uso da imagem do meu rosto e do modelo facial gerado a partir dela exclusivamente para identificação no controle de acesso da universidade. Posso solicitar a exclusão desses dados a qualquer momento.
+    </div>
+        <div class="form-group">
+            <label style="font-weight: normal; cursor: pointer;">
+                <input type="checkbox" name="consent" required> Li e aceito o termo de consentimento
+            </label>
         </div>
         <button type="submit">Cadastrar por Foto</button>
     </form>
@@ -38,6 +59,18 @@
     <div class="form-group">
         <label for="webcam-name">Nome da pessoa:</label>
         <input type="text" id="webcam-name" placeholder="Ex.: João Souza">
+    </div>
+    <div class="form-group">
+        <label for="webcam-matricula">Matrícula (situação: ativa):</label>
+        <input type="text" id="webcam-matricula" placeholder="Ex.: 20260123">
+    </div>
+    <div class="alert" style="background:#f8fafc; border:1px solid var(--border); font-weight: normal; font-size: 0.9rem;">
+        <strong>Termo de consentimento (LGPD):</strong> autorizo o uso da imagem do meu rosto e do modelo facial gerado a partir dela exclusivamente para identificação no controle de acesso da universidade. Posso solicitar a exclusão desses dados a qualquer momento.
+    </div>
+    <div class="form-group">
+        <label style="font-weight: normal; cursor: pointer;">
+            <input type="checkbox" id="webcam-consent"> Li e aceito o termo de consentimento
+        </label>
     </div>
     <div style="margin-bottom: 1rem;">
         <video id="reg-video" width="480" height="360" autoplay playsinline muted style="background: #000; border-radius: 8px; max-width: 100%;"></video>
@@ -61,6 +94,15 @@ capBtn.addEventListener('click', () => {
         msgBox.innerHTML = '<div class="alert alert-error">Digite o nome da pessoa antes de capturar.</div>';
         return;
     }
+    const matricula = document.getElementById('webcam-matricula').value.trim();
+    if (!matricula) {
+        msgBox.innerHTML = '<div class="alert alert-error">Digite a matrícula antes de capturar.</div>';
+        return;
+    }
+    if (!document.getElementById('webcam-consent').checked) {
+        msgBox.innerHTML = '<div class="alert alert-error">É necessário aceitar o termo de consentimento.</div>';
+        return;
+    }
     if (!regVideo.videoWidth) {
         msgBox.innerHTML = '<div class="alert alert-error">A webcam não está ativa.</div>';
         return;
@@ -74,6 +116,9 @@ capBtn.addEventListener('click', () => {
     canvas.toBlob(blob => {
         const fd = new FormData();
         fd.append('name', name);
+        fd.append('matricula', matricula);
+        fd.append('situacao', 'ativa');
+        fd.append('consent', 'true');
         fd.append('image', blob, 'webcam_register.jpg');
 
         fetch('/api/register', { method: 'POST', body: fd })
