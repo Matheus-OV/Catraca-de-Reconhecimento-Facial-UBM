@@ -1,6 +1,6 @@
 # Estrutura do Banco de Dados — Catraca de Reconhecimento Facial UBM
 
-Versão: 1.0 · Data: 25/11/2026 · Repositório: https://github.com/Matheus-OV/Catraca-de-Reconhecimento-Facial-UBM
+Versão: 1.1 · Data: 25/11/2026 · Repositório: https://github.com/Matheus-OV/Catraca-de-Reconhecimento-Facial-UBM
 
 Este documento descreve o banco de dados em duas partes: o que **existe hoje no código** (seção 2) e o modelo **proposto** para a catraca do campus (seção 4). A seção 3 explica por que o modelo atual não basta. Nada da seção 4 está implementado ainda.
 
@@ -23,6 +23,9 @@ erDiagram
         BLOB embedding
         BLOB photo
         TIMESTAMP created_at
+        TEXT matricula "UNIQUE"
+        TEXT situacao "ativa, trancada, cancelada, formada"
+        TIMESTAMP consent_at "aceite do termo LGPD"
     }
     detections {
         INTEGER id PK
@@ -30,6 +33,7 @@ erDiagram
         INTEGER faces_count
         TEXT recognized_names
         TIMESTAMP created_at
+        TEXT decisions "decisão e motivo por rosto"
     }
 ```
 
@@ -44,6 +48,9 @@ As duas tabelas **não têm relacionamento** entre si. O vínculo entre uma dete
 | `embedding` | BLOB | NOT NULL | Vetor facial de 128 números `float64` (1024 bytes) |
 | `photo` | BLOB | — | Recorte JPEG do rosto usado no cadastro |
 | `created_at` | TIMESTAMP | DEFAULT CURRENT_TIMESTAMP | Data e hora do cadastro (UTC) |
+| `matricula` | TEXT | UNIQUE (índice `idx_people_matricula`) | Matrícula informada no cadastro. Obrigatória para novos cadastros; pode ser nula em cadastros antigos |
+| `situacao` | TEXT | NOT NULL, DEFAULT `'ativa'` | Situação da matrícula: `ativa`, `trancada`, `cancelada` ou `formada`. Só `ativa` libera o acesso |
+| `consent_at` | TIMESTAMP | — | Data e hora (UTC) em que a pessoa aceitou o termo de consentimento (LGPD). Nulo em cadastros antigos |
 
 ### 2.3 Tabela `detections` (histórico de detecções)
 
@@ -54,28 +61,33 @@ As duas tabelas **não têm relacionamento** entre si. O vínculo entre uma dete
 | `faces_count` | INTEGER | NOT NULL | Quantidade de rostos detectados |
 | `recognized_names` | TEXT | — | Nomes reconhecidos separados por vírgula, ou `Nenhum` |
 | `created_at` | TIMESTAMP | DEFAULT CURRENT_TIMESTAMP | Data e hora da detecção (UTC) |
+| `decisions` | TEXT | — | Decisão de acesso e motivo de cada rosto, separados por `;` (ex.: `Maria Silva: negado (Matrícula trancada); Desconhecido: negado (Rosto não cadastrado)`) |
 
 ### 2.4 Operações disponíveis (`db.py`)
 
 | Função | O que faz |
 |---|---|
-| `init_db()` | Cria as tabelas se não existirem |
-| `add_person(name, embedding_bytes, photo_bytes)` | Insere uma pessoa e devolve o `id` |
+| `init_db()` | Cria as tabelas se não existirem e adiciona as colunas novas em bancos antigos (migração) |
+| `add_person(name, embedding_bytes, photo_bytes, matricula, situacao, consented)` | Insere uma pessoa e devolve o `id`. Falha com `IntegrityError` se a matrícula já existir |
 | `get_all_people()` | Lista as pessoas por nome, com a foto em Base64 |
-| `delete_person(person_id)` | Remove a pessoa; devolve `True` se removeu |
-| `save_detection(image_name, faces_count, recognized_names)` | Grava uma detecção no histórico |
+| `get_person(person_id)` | Busca uma pessoa pelo `id` |
+| `update_situacao(person_id, situacao)` | Altera a situação da matrícula |
+| `delete_person(person_id)` | Remove a pessoa do banco; devolve `True` se removeu. A exclusão do arquivo em `photos/` é feita por `delete_person_with_files` em `vision.py` |
+| `save_detection(image_name, faces_count, recognized_names, decisions)` | Grava uma detecção no histórico, com a decisão de acesso |
 | `list_detections(limit)` | Lista as detecções mais recentes |
 
 ## 3. Limitações do modelo atual
 
-| Problema | Consequência |
+Já resolvido nesta versão: a matrícula e a situação existem (`people.matricula`, `people.situacao`), o aceite do termo LGPD é registrado (`people.consent_at`), o histórico guarda a decisão de acesso e o motivo (`detections.decisions`) e a exclusão de uma pessoa apaga também a foto em `photos/`.
+
+| Problema que continua | Consequência |
 |---|---|
-| Sem relacionamento: `detections.recognized_names` é texto separado por vírgula, não referência a `people.id` | Se uma pessoa for excluída ou mudar de nome, o histórico perde a ligação. Também não dá para consultar "todas as detecções da pessoa X" com SQL |
-| Não existe matrícula nem situação (ativa/inativa) | Não é possível aplicar a regra "só libera com matrícula ativa" |
+| Sem relacionamento: `detections.recognized_names` e `detections.decisions` são texto, não referência a `people.id` | Se uma pessoa for excluída ou mudar de nome, o histórico perde a ligação. Também não dá para consultar "todas as detecções da pessoa X" com SQL |
 | Não existe perfil (aluno, funcionário, visitante com validade) | Todos são tratados igual, sem prazo de acesso |
-| Não existe registro de acesso liberado ou negado, nem catraca | O histórico é de análise de imagens, não de passagens |
-| Não existe consentimento LGPD | O sistema guarda dado biométrico (rosto) sem registrar o aceite nem permitir a revogação |
-| Não existem usuários administradores | As rotas de cadastro e exclusão não exigem login |
+| Não existe registro estruturado de acesso liberado ou negado, nem catraca | A decisão fica em texto no histórico de detecções, não em uma tabela de acessos |
+| O consentimento é só uma data na tabela `people` | Não guarda a versão do termo nem a revogação |
+| Não existem usuários administradores | As rotas de cadastro, exclusão e alteração de situação não exigem login |
+| A situação da matrícula é informada manualmente | Não há integração com o sistema acadêmico da universidade |
 | Uma pessoa tem só uma foto/vetor | Não dá para cadastrar vários ângulos nem substituir um cadastro ruim sem apagar a pessoa |
 
 ## 4. Modelo proposto para a catraca (não implementado)
@@ -278,10 +290,12 @@ CREATE INDEX idx_rosto_pessoa       ON deteccao_rosto(pessoa_id);
 | Hoje | Depois |
 |---|---|
 | `people.name` | `pessoa.nome` |
+| `people.matricula`, `people.situacao` | `pessoa.matricula`, `pessoa.situacao` |
+| `people.consent_at` | `consentimento_lgpd.aceito_em` |
 | `people.embedding`, `people.photo` | `biometria_facial.embedding`, `biometria_facial.foto` |
 | `people.created_at` | `pessoa.criado_em` |
 | `detections` (uma linha por imagem) | `deteccao` (uma linha por imagem) |
-| `detections.recognized_names` (texto) | `deteccao_rosto.pessoa_id` (uma linha por rosto) |
+| `detections.recognized_names`, `detections.decisions` (texto) | `deteccao_rosto.pessoa_id` e `acesso.resultado`/`acesso.motivo` (uma linha por rosto) |
 | — | `perfil`, `consentimento_lgpd`, `catraca`, `acesso`, `usuario_admin` (novas) |
 
 Para os cadastros que já existem, a migração deve criar a pessoa com perfil padrão e `situacao = 'ativa'`, sem matrícula, e exigir que o consentimento seja registrado antes de a pessoa ser liberada.
