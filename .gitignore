@@ -23,3 +23,15 @@ photos/*
 # Sistema operacional
 .DS_Store
 Thumbs.db
+
+# Dados biométricos: nunca enviar ao Git
+*.db
+photos/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Segredos
+.env
