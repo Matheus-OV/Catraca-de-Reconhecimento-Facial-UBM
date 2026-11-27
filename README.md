@@ -133,14 +133,6 @@ Se `./iniciar.sh` foi usado, antes disso aparecem as etapas `[1/3]`, `[2/3]` e `
 
 <!-- TODO: adicionar capturas de tela em docs/img/ e referenciá-las aqui, por exemplo: ![Tela inicial](docs/img/tela-inicial.png) -->
 
-## Publicação na Vercel
-
-O repositório inclui um `vercel.json` que publica o `app.py` com o runtime `@vercel/python`. Antes de usar, saiba das limitações:
-
-- **Os dados não são permanentes.** Na Vercel o disco é somente leitura, exceto `/tmp`. Por isso o banco fica em `/tmp/reconhecimento.db`, que é apagado quando a instância reinicia ou é recriada. **Os cadastros se perdem** e o reconhecimento volta a não identificar ninguém.
-- **A pasta de fotos precisa ir para `/tmp`.** O código tenta criar a pasta `photos/` ao iniciar, o que falha em disco somente leitura. Nas variáveis de ambiente do projeto na Vercel, defina `PHOTOS_DIR=/tmp/photos`.
-- **Uso recomendado:** apenas demonstração. Para o uso real na catraca, execute o sistema em um servidor com disco persistente (veja "Como executar") ou troque o SQLite por um banco externo.
-- A webcam só funciona em páginas HTTPS ou `localhost`; a Vercel fornece HTTPS automaticamente.
 
 ## Testes
 
