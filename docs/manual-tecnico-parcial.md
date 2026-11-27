@@ -1,6 +1,6 @@
 # Manual Técnico Parcial — Catraca de Reconhecimento Facial UBM
 
-Versão: 1.1 · Data: 26/11/2026 · Repositório: https://github.com/Matheus-OV/Catraca-de-Reconhecimento-Facial-UBM
+Versão: 1.2 · Data: 27/11/2026 · Repositório: https://github.com/Matheus-OV/Catraca-de-Reconhecimento-Facial-UBM
 
 ## 1. Público-alvo e tarefas
 
@@ -10,7 +10,7 @@ Ao final da leitura, essa pessoa deve conseguir:
 
 - integrar um novo cliente (a catraca física ou uma nova tela) às rotas existentes da API para cadastrar pessoas, reconhecer rostos e obter a decisão de acesso (resolvida na seção 2)
 - alterar o cadastro ou o reconhecimento facial sem quebrar as regras que decidem quem é liberado, quem é negado e quem é "Desconhecido" (resolvida na seção 3)
-- saber o que o sistema ainda **não** garante em precisão e em segurança antes de colocá-lo em uso real (resolvida na seção 4)
+- saber o que o sistema ainda **não** garante em precisão e em segurança antes de colocá-lo em uso real (resolvida na seção 3, em "Limitações conhecidas")
 
 Para instalar e executar o sistema, consulte o [README](../README.md). A estrutura do banco de dados está em [BANCO_DE_DADOS.md](BANCO_DE_DADOS.md).
 
@@ -18,7 +18,7 @@ Para instalar e executar o sistema, consulte o [README](../README.md). A estrutu
 
 ### Visão geral
 
-Esta referência cobre as 6 rotas REST usadas pelas telas de webcam, cadastro e pessoas. Um cliente externo, como a catraca, deve usar essas mesmas rotas. **Nenhuma rota exige autenticação** (veja a seção 4.2). Endereço base: http://localhost:8000 (a porta pode ser alterada pela variável de ambiente `PORT`). As rotas `POST` recebem `multipart/form-data`; a rota de situação também aceita JSON. Todas as rotas respondem em JSON.
+Esta referência cobre as 6 rotas REST usadas pelas telas de webcam, cadastro e pessoas. Um cliente externo, como a catraca, deve usar essas mesmas rotas. **Nenhuma rota exige autenticação** (veja "Segurança", na seção 3). Endereço base: http://localhost:8000 (a porta pode ser alterada pela variável de ambiente `PORT`). As rotas `POST` recebem `multipart/form-data`; a rota de situação também aceita JSON. Todas as rotas respondem em JSON.
 
 Nos exemplos abaixo, os textos em Base64 foram encurtados com `...`. Os exemplos são respostas reais, geradas com as imagens da pasta `examples/`.
 
@@ -70,7 +70,8 @@ Erros possíveis:
 |---|---|---|
 | 400 | `"Nenhuma imagem enviada."` | O campo `image` não foi enviado |
 | 400 | `"Arquivo de imagem inválido ou corrompido."` | O arquivo não é uma imagem |
-| 413 | (página de erro do Flask) | O arquivo passa de 16 MB |
+| 400 | Mensagem interna do OpenCV (`... !buf.empty() ...`) | O arquivo enviado está vazio (0 bytes) |
+| 413 | (página de erro do Flask) | A requisição passa de 16 MB |
 
 #### POST /api/register
 
@@ -81,7 +82,7 @@ Cadastra uma pessoa a partir do nome, da matrícula, do aceite do termo de conse
 | name | texto | Sim | Nome da pessoa. Espaços no início e no fim são removidos |
 | matricula | texto | Sim | Matrícula da pessoa. Não pode repetir a de outro cadastro |
 | consent | texto (`true`, `on`, `1` ou `sim`) | Sim | Aceite do termo de consentimento. Qualquer outro valor, ou a ausência do campo, recusa o cadastro |
-| situacao | texto | Não | Situação da matrícula. Padrão: `ativa`. Só `ativa` pode ser cadastrada |
+| situacao | texto | Não | Situação da matrícula. Padrão: `ativa`. Só `ativa`, em letras minúsculas, é aceita no cadastro |
 | image | arquivo (JPEG, PNG ou WebP) | Sim | Foto com o rosto da pessoa, de preferência frontal e bem iluminada |
 
 Exemplo de requisição:
@@ -108,19 +109,20 @@ Resposta de sucesso: 200 OK, com o `person_id` gerado, os dados do cadastro, a p
 }
 ```
 
-Erros possíveis (todos com código 400, exceto o último):
+Erros possíveis:
 
-| Mensagem | Quando acontece |
-|---|---|
-| `"Informe o nome e envie a imagem."` | Falta o nome (ou ele só tem espaços) ou a imagem |
-| `"Informe a matrícula."` | Falta a matrícula |
-| `"Situação inválida. Use: ativa, trancada, cancelada, formada."` | `situacao` tem um valor fora da lista |
-| `"Só é possível cadastrar pessoas com matrícula ativa."` | `situacao` é `trancada`, `cancelada` ou `formada` |
-| `"É necessário aceitar o termo de consentimento para o uso da imagem do rosto."` | `consent` não foi enviado ou não é um valor de aceite |
-| `"Arquivo de imagem inválido ou corrompido."` | O arquivo não é uma imagem |
-| `"Nenhum rosto foi detectado na imagem enviada. Tente uma foto frontal bem iluminada."` | A foto não tem rosto detectável |
-| `"Já existe uma pessoa cadastrada com essa matrícula."` | A matrícula já está em outro cadastro |
-| 413 (página de erro do Flask) | O arquivo passa de 16 MB |
+| Código | Mensagem | Quando acontece |
+|---|---|---|
+| 400 | `"Informe o nome e envie a imagem."` | Falta o nome (ou ele só tem espaços) ou a imagem |
+| 400 | `"Informe a matrícula."` | Falta a matrícula |
+| 400 | `"Situação inválida. Use: ativa, trancada, cancelada, formada."` | `situacao` tem um valor fora da lista |
+| 400 | `"Só é possível cadastrar pessoas com matrícula ativa."` | `situacao` é `trancada`, `cancelada` ou `formada` |
+| 400 | `"É necessário aceitar o termo de consentimento para o uso da imagem do rosto."` | `consent` não foi enviado ou não é um valor de aceite |
+| 400 | `"Arquivo de imagem inválido ou corrompido."` | O arquivo não é uma imagem |
+| 400 | `"Nenhum rosto foi detectado na imagem enviada. Tente uma foto frontal bem iluminada."` | A foto não tem rosto detectável |
+| 400 | `"Já existe uma pessoa cadastrada com essa matrícula."` | A matrícula já está em outro cadastro |
+| 400 | Mensagem interna do OpenCV (`... !buf.empty() ...`) | O arquivo enviado está vazio (0 bytes) |
+| 413 | (página de erro do Flask) | A requisição passa de 16 MB |
 
 #### GET /api/people
 
@@ -136,7 +138,7 @@ Exemplo de requisição:
 curl http://localhost:8000/api/people
 ```
 
-Resposta de sucesso: 200 OK, com o total (`count`) e a lista de pessoas com `id`, `name`, `matricula`, `situacao`, `created_at` e `consent_at` (horários em UTC) e `photo_b64`. O embedding facial não é devolvido, mas **a foto do rosto é** (veja a seção 4.2).
+Resposta de sucesso: 200 OK, com o total (`count`) e a lista de pessoas com `id`, `name`, `matricula`, `situacao`, `created_at` e `consent_at` (horários em UTC) e `photo_b64`. O embedding facial não é devolvido, mas **a foto do rosto é** (veja "Segurança", na seção 3).
 
 ```json
 {
@@ -164,7 +166,7 @@ Altera a situação da matrícula de uma pessoa. A rota também aceita o método
 | Parâmetro | Tipo | Obrigatório | Descrição |
 |---|---|---|---|
 | id | inteiro (na rota) | Sim | `id` da pessoa, obtido em `GET /api/people` |
-| situacao | texto (JSON ou formulário) | Sim | `ativa`, `trancada`, `cancelada` ou `formada` |
+| situacao | texto (JSON ou formulário) | Sim | `ativa`, `trancada`, `cancelada` ou `formada`. Nesta rota, maiúsculas e espaços nas pontas são ignorados |
 
 Exemplo de requisição:
 
@@ -186,6 +188,7 @@ Erros possíveis:
 |---|---|---|
 | 400 | `"Situação inválida. Use: ativa, trancada, cancelada, formada."` | `situacao` ausente ou fora da lista |
 | 404 | `{"success": false, "id": 99, "situacao": "ativa"}` | Não existe pessoa com esse `id` |
+| 500 | (página de erro do Flask) | O JSON não é um objeto (ex.: `[1]`) ou `situacao` não é texto (ex.: `5`) |
 
 #### DELETE /api/people/{id}
 
@@ -286,19 +289,21 @@ Estas são as regras que o código aplica hoje no cadastro, no reconhecimento fa
 | RN16 | Cada registro do histórico guarda a decisão e o motivo de cada rosto | `vision.py` (`analyze_image_bytes`) e `db.py` (`save_detection`) | O campo `decisions` traz `"Maria Silva: liberado (Matrícula ativa); Desconhecido: negado (...)"` |
 | RN17 | No modo privacidade (`blur`), os rostos são desfocados e nenhum nome é desenhado na imagem, mas o reconhecimento continua sendo feito e devolvido no JSON | `vision.py` (`analyze_image_bytes`) | Com `blur=true`, a imagem volta desfocada e `recognized_names` continua preenchido |
 
-## 4. Limitações conhecidas
+### Limitações conhecidas
 
 Esta seção existe para que ninguém coloque o sistema em uso real achando que ele garante mais do que garante hoje.
 
-### 4.1 Algoritmo de reconhecimento
+#### Algoritmo de reconhecimento
 
 O "descritor facial de 128 dimensões" (`extract_face_embedding` em `vision.py`) **não vem de um modelo de reconhecimento facial treinado** (como uma rede neural). Ele é uma combinação de três medidas simples do recorte do rosto, já reduzido para 64 x 64 pixels e com o contraste equalizado (CLAHE):
 
-| Parte | Tamanho | O que mede | Peso |
+| Parte | Tamanho | O que mede | Multiplicador no código |
 |---|---|---|---|
 | Grade de pixels | 64 valores (8 x 8) | Brilho médio de cada região do rosto | 0,50 |
 | Bordas (Sobel) | 48 valores | Força das bordas horizontais e verticais | 0,35 |
 | Histograma de tons | 16 valores | Distribuição de tons claros e escuros | 0,15 |
+
+Antes do cálculo, 10% de cada borda do recorte é descartado. Os multiplicadores **não representam a importância de cada parte**: a grade de pixels é padronizada (norma 8) antes de ser multiplicada, e as outras duas partes têm norma 1. Depois da normalização final, a grade responde por cerca de **99%** do vetor (em norma ao quadrado), as bordas por 0,8% e o histograma por 0,1%. Na prática, o reconhecimento compara quase só o padrão de claro e escuro em uma grade de 8 x 8.
 
 Isso funciona como demonstração, mas tem consequências:
 
@@ -307,14 +312,15 @@ Isso funciona como demonstração, mas tem consequências:
 - **Contradiz a meta do backlog.** O item 7 do backlog exige no máximo 0,1% de falsa aceitação. Com o descritor atual, essa meta não está garantida nem foi medida. Atingi-la exige trocar o descritor por um modelo de reconhecimento facial treinado e medir a taxa com um conjunto de testes adequado.
 - **Não há prova de vida.** O sistema não distingue um rosto real de uma foto impressa ou da tela de um celular. Uma foto de uma pessoa cadastrada pode liberar o acesso.
 
-### 4.2 Segurança
+#### Segurança
 
 - **Não há login.** Qualquer pessoa que acesse o endereço do servidor pode cadastrar rostos (`POST /api/register`), excluir cadastros (`DELETE /api/people/{id}`, que **também aceita `POST`**) e alterar a situação da matrícula (`POST /api/people/{id}/situacao`), liberando ou bloqueando o acesso de qualquer pessoa.
 - **As fotos de rosto ficam expostas.** `GET /api/people` devolve a foto do rosto de todas as pessoas cadastradas, sem login. Foto de rosto é dado biométrico, ou seja, dado pessoal sensível pela LGPD.
-- **Mensagens de erro internas são devolvidas ao cliente.** As rotas devolvem o texto da exceção do Python em caso de erro inesperado, o que pode revelar detalhes internos.
+- **Cadastros sem consentimento continuam liberados.** A decisão de acesso olha só a situação da matrícula; um cadastro antigo com `consent_at` nulo é liberado se a matrícula estiver `ativa`.
+- **Mensagens de erro internas são devolvidas ao cliente.** A página inicial, o cadastro e as rotas `/api/analyze` e `/api/register` devolvem o texto da exceção do Python em caso de erro inesperado, o que pode revelar detalhes internos.
 - **Uso recomendado hoje:** apenas em rede local controlada, para demonstração. Antes do uso real, é preciso no mínimo exigir login de administrador nas rotas de cadastro, exclusão, alteração de situação e listagem.
 
-## 5. Próximas seções previstas
+## 4. Próximas seções previstas
 
 | Seção prevista | Quando será incluída |
 |---|---|
